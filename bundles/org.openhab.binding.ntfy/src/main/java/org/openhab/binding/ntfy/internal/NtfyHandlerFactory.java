@@ -42,7 +42,7 @@ import org.osgi.service.component.annotations.Reference;
 public class NtfyHandlerFactory extends BaseThingHandlerFactory {
 
     private static final Set<ThingTypeUID> SUPPORTED_THING_TYPES_UIDS = Set.of(NTFY_CONNECTION_THING, NTFY_TOPIC_THING);
-    private HttpClient httpClient;
+    private HttpClientFactory httpClientFactory;
     private WebSocketFactory webSocketFactory;
 
     /**
@@ -55,7 +55,7 @@ public class NtfyHandlerFactory extends BaseThingHandlerFactory {
     @Activate
     public NtfyHandlerFactory(@Reference HttpClientFactory httpClientFactory,
             @Reference WebSocketFactory webSocketFactory) {
-        this.httpClient = httpClientFactory.getCommonHttpClient();
+        this.httpClientFactory = httpClientFactory;
         this.webSocketFactory = webSocketFactory;
     }
 
@@ -73,7 +73,7 @@ public class NtfyHandlerFactory extends BaseThingHandlerFactory {
         }
 
         if (NTFY_TOPIC_THING.equals(thingTypeUID)) {
-            return new NtfyTopicHandler(thing, httpClient);
+            return new NtfyTopicHandler(thing, httpClientFactory.getCommonHttpClient());
         }
 
         return null;

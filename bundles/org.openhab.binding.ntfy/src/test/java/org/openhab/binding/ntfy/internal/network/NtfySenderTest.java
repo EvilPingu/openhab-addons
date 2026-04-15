@@ -116,6 +116,7 @@ public class NtfySenderTest {
 
         when(httpClient.newRequest(any(URI.class))).thenReturn(request);
         when(request.method(HttpMethod.DELETE)).thenReturn(request);
+        when(request.timeout(anyLong(), any(TimeUnit.class))).thenReturn(request);
         when(request.send()).thenReturn(response);
         when(response.getStatus()).thenReturn(200);
 
@@ -179,6 +180,7 @@ public class NtfySenderTest {
         String json = "{\"sequence_id\":\"seq-file-1\",\"message\":\"uploaded\",\"priority\":4,\"event\":\"message\"}";
         when(response.getStatus()).thenReturn(200);
         when(response.getContentAsString()).thenReturn(json);
+        when(request.timeout(anyLong(), any(TimeUnit.class))).thenReturn(request);
 
         NtfyConnectionHandler handler = mock(NtfyConnectionHandler.class);
 

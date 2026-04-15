@@ -49,5 +49,5 @@ public interface WebSocketConnectionListener {
      *
      * @param messageEvent the parsed {@link BaseEvent}
      */
-    void messageRecieved(BaseEvent messageEvent);
+    void messageReceived(BaseEvent messageEvent);
 }

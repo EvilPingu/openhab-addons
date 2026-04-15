@@ -42,9 +42,10 @@ public class HttpActionButton extends ActionButtonBase {
      * @param headers optional headers to include (may be null)
      * @param body optional request body (may be null)
      * @throws MalformedURLException when the provided URL is not a valid URL
+     * @throws IllegalArgumentException when the provided URL is not valid
      */
     public HttpActionButton(String label, Boolean clearNotification, String url, @Nullable String method,
-            @Nullable String headers, @Nullable String body) throws MalformedURLException {
+            @Nullable String headers, @Nullable String body) throws IllegalArgumentException, MalformedURLException {
         super(label, clearNotification);
 
         this.url = URI.create(url).toURL();

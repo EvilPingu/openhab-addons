@@ -44,7 +44,7 @@ import org.slf4j.LoggerFactory;
 public class NtfySender {
 
     private @Nullable NtfyConnectionConfiguration configuration;
-    private Supplier<NtfyConnectionHandler> getBridgeHandler;
+    private Supplier<@Nullable NtfyConnectionHandler> getBridgeHandler;
     private HttpClient httpClient;
     private String topicName;
     private final Logger logger = LoggerFactory.getLogger(NtfySender.class);
@@ -56,7 +56,8 @@ public class NtfySender {
      * @param httpClient the Jetty {@link HttpClient} used to perform requests
      * @param getBridgeHandler supplier returning the associated {@link NtfyConnectionHandler}
      */
-    public NtfySender(String topicName, HttpClient httpClient, Supplier<NtfyConnectionHandler> getBridgeHandler) {
+    public NtfySender(String topicName, HttpClient httpClient,
+            Supplier<@Nullable NtfyConnectionHandler> getBridgeHandler) {
         this.topicName = topicName;
         this.getBridgeHandler = getBridgeHandler;
         this.httpClient = httpClient;
@@ -71,11 +72,11 @@ public class NtfySender {
      * @throws URISyntaxException
      */
     public @Nullable MessageEvent sendMessage(NtfyMessage ntfyMessage) throws URISyntaxException {
-        NtfyConnectionConfiguration connectionConfiguration = getConfigurarion();
+        NtfyConnectionConfiguration connectionConfiguration = getConfiguration();
 
-        Request request = httpClient.newRequest(new URI(connectionConfiguration.hostname + "/" + topicName))
-                .method(HttpMethod.POST).content(new StringContentProvider(ntfyMessage.getMessage()))
-                .timeout(1, TimeUnit.MINUTES);
+        Request request = httpClient.newRequest(buildRequestURI(connectionConfiguration)).method(HttpMethod.POST)
+                .content(new StringContentProvider(ntfyMessage.getMessage()))
+                .timeout(connectionConfiguration.connectionTimeout, TimeUnit.MILLISECONDS);
 
         if (connectionConfiguration.isAuthHeaderNeeded()) {
             String authHeader = connectionConfiguration.buildAuthHeader();
@@ -90,9 +91,21 @@ public class NtfySender {
             if (HttpStatus.isSuccess(response.getStatus())) {
                 return GsonDeserializer.deserialize(response.getContentAsString(), MessageEvent.class);
             }
-        } catch (InterruptedException | TimeoutException | ExecutionException e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             logger.error("Failed to send message: {}", e.getMessage());
-            getBridge().connectionError(e);
+            @Nullable
+            NtfyConnectionHandler bridge = getBridge();
+            if (bridge != null) {
+                bridge.connectionError(e);
+            }
+        } catch (TimeoutException | ExecutionException e) {
+            logger.error("Failed to send message: {}", e.getMessage());
+            @Nullable
+            NtfyConnectionHandler bridge = getBridge();
+            if (bridge != null) {
+                bridge.connectionError(e);
+            }
         }
 
         return null;
@@ -109,10 +122,10 @@ public class NtfySender {
      */
     public @Nullable MessageEvent sendFile(String file, @Nullable String filename, @Nullable String sequenceId)
             throws URISyntaxException {
-        NtfyConnectionConfiguration connectionConfiguration = getConfigurarion();
+        NtfyConnectionConfiguration connectionConfiguration = getConfiguration();
 
-        Request request = httpClient.newRequest(new URI(connectionConfiguration.hostname + "/" + topicName))
-                .method(HttpMethod.PUT);
+        Request request = httpClient.newRequest(buildRequestURI(connectionConfiguration)).method(HttpMethod.PUT)
+                .timeout(connectionConfiguration.connectionTimeout, TimeUnit.MILLISECONDS);
 
         NtfyMessage ntfyMessage = new NtfyMessage();
         ntfyMessage.setSequenceId(sequenceId);
@@ -124,23 +137,32 @@ public class NtfySender {
             request.header("Authorization", authHeader);
         }
 
-        try {
-            java.nio.file.Path path = java.nio.file.Path.of(file);
-            request.content(new InputStreamContentProvider(java.nio.file.Files.newInputStream(path)));
-        } catch (IOException e) {
-            logger.error("Failed to read file for upload: {}", e.getMessage());
-            return null;
-        }
-
-        ContentResponse response;
-        try {
-            response = request.send();
+        java.nio.file.Path path = java.nio.file.Path.of(file);
+        try (InputStreamContentProvider contentProvider = new InputStreamContentProvider(
+                java.nio.file.Files.newInputStream(path))) {
+            request.content(contentProvider);
+            ContentResponse response = request.send();
             if (HttpStatus.isSuccess(response.getStatus())) {
                 return GsonDeserializer.deserialize(response.getContentAsString(), MessageEvent.class);
             }
-        } catch (InterruptedException | TimeoutException | ExecutionException e) {
+        } catch (IOException e) {
+            logger.error("Failed to read file for upload: {}", e.getMessage());
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.error("Failed to send message: {}", e.getMessage());
+            @Nullable
+            NtfyConnectionHandler bridge = getBridge();
+            if (bridge != null) {
+                bridge.connectionError(e);
+            }
+        } catch (TimeoutException | ExecutionException e) {
             logger.error("Failed to send file: {}", e.getMessage());
-            getBridge().connectionError(e);
+            @Nullable
+            NtfyConnectionHandler bridge = getBridge();
+            if (bridge != null) {
+                bridge.connectionError(e);
+            }
         }
         return null;
     }
@@ -153,11 +175,12 @@ public class NtfySender {
      * @throws URISyntaxException when the request URI could not be constructed
      */
     public boolean deleteMessage(String sequenceId) throws URISyntaxException {
-        NtfyConnectionConfiguration connectionConfiguration = getConfigurarion();
+        NtfyConnectionConfiguration connectionConfiguration = getConfiguration();
 
-        Request request = httpClient
-                .newRequest(new URI(connectionConfiguration.hostname + "/" + topicName + "/" + sequenceId))
-                .method(HttpMethod.DELETE);
+        URI requestURI = buildRequestURI(connectionConfiguration);
+
+        Request request = httpClient.newRequest(requestURI.resolve(requestURI.getPath() + "/" + sequenceId))
+                .method(HttpMethod.DELETE).timeout(connectionConfiguration.connectionTimeout, TimeUnit.MILLISECONDS);
 
         if (connectionConfiguration.isAuthHeaderNeeded()) {
             String authHeader = connectionConfiguration.buildAuthHeader();
@@ -166,24 +189,46 @@ public class NtfySender {
 
         try {
             return HttpStatus.isSuccess(request.send().getStatus());
-        } catch (InterruptedException | TimeoutException | ExecutionException e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             logger.error("Failed to delete message: {}", e.getMessage());
-            getBridge().connectionError(e);
+            @Nullable
+            NtfyConnectionHandler bridge = getBridge();
+            if (bridge != null) {
+                bridge.connectionError(e);
+            }
+        } catch (TimeoutException | ExecutionException e) {
+            logger.error("Failed to delete message: {}", e.getMessage());
+            @Nullable
+            NtfyConnectionHandler bridge = getBridge();
+            if (bridge != null) {
+                bridge.connectionError(e);
+            }
         }
         return false;
     }
 
-    private NtfyConnectionConfiguration getConfigurarion() {
+    private NtfyConnectionConfiguration getConfiguration() {
         NtfyConnectionConfiguration configuration = this.configuration;
         if (configuration != null) {
             return configuration;
         }
 
-        configuration = getBridge().getThing().getConfiguration().as(NtfyConnectionConfiguration.class);
+        @Nullable
+        NtfyConnectionHandler bridge = getBridge();
+        if (bridge == null) {
+            throw new IllegalStateException("Cannot send message: no connection handler available");
+        }
+
+        configuration = this.configuration = bridge.getThing().getConfiguration().as(NtfyConnectionConfiguration.class);
         return configuration;
     }
 
-    private NtfyConnectionHandler getBridge() {
+    private URI buildRequestURI(NtfyConnectionConfiguration connectionConfiguration) throws URISyntaxException {
+        return new URI(connectionConfiguration.hostname).resolve("./" + topicName);
+    }
+
+    private @Nullable NtfyConnectionHandler getBridge() {
         return getBridgeHandler.get();
     }
 }
